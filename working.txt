@@ -1,0 +1,130 @@
+#include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
+#include <Arduino_JSON.h>
+
+const char* ssid = "Jagan";    // Your network SSID (name of WiFi network)
+const char* password = "84005069";
+const int relayPin = D1;
+
+WiFiClientSecure client;
+HTTPClient http;
+
+String cardId = "";
+bool trashOpened = false;
+
+void setup() {
+  Serial.begin(9600);
+  pinMode(relayPin, OUTPUT);
+
+  // Connect to WiFi
+  connectToWiFi();
+}
+
+void loop() {
+  if (Serial.available() >= 12) {
+    cardId = Serial.readStringUntil('\n');
+
+    if (cardId != "") {
+      if (!trashOpened) {
+        processOpenRequest(cardId);
+      } else {
+        processCloseRequest(cardId);
+      }
+    }
+  }
+}
+
+void connectToWiFi() {
+  Serial.print("Connecting to WiFi");
+  WiFi.begin(ssid, password);
+
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.print(".");
+  }
+
+  Serial.println("\nWiFi connected");
+}
+
+void processOpenRequest(const String& card) {
+  Serial.print("Card Number (Opening): ");
+  Serial.println(card);
+
+  String trashOpening = "https://trashee.vercel.app/opening-log?id=" + card;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    String sensorReadings = httpGETRequest(trashOpening);
+
+    JSONVar myObject = JSON.parse(sensorReadings);
+    Serial.println(myObject);
+
+    if (!myObject) {
+      Serial.println("Trash Opened");
+      trashOpened = true;
+      digitalWrite(relayPin, HIGH);
+    } else {
+      Serial.println("Invalid response from the server");
+      return;  // Exit the function if the JSON object is null
+    }
+
+  } else {
+    Serial.println("WiFi Disconnected. Reconnecting...");
+    connectToWiFi();
+  }
+
+  delay(10000);  // Adjust the delay as needed
+}
+
+void processCloseRequest(const String& card) {
+  Serial.print("Card Number (Closing): ");
+  Serial.println(card);
+
+  // Add your logic to check if the same user is closing the trash or not
+  // For example, compare card with the previous opening card
+
+  // Assuming your server URL for closing is different, modify it accordingly
+  String trashClosing = "https://trashee.vercel.app/closing-log?id=" + card;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    String sensorReadings = httpGETRequest(trashClosing);
+
+    JSONVar myObject = JSON.parse(sensorReadings);
+    Serial.println(myObject);
+
+    if (!myObject) {
+      digitalWrite(relayPin, LOW);
+    } else {
+      Serial.println("Invalid response from the server");
+      return;  // Exit the function if the JSON object is null
+    }
+
+    Serial.println("Trash Closed");
+    trashOpened = false;
+  } else {
+    Serial.println("WiFi Disconnected. Reconnecting...");
+    connectToWiFi();
+  }
+
+  delay(10000);  // Adjust the delay as needed
+}
+
+String httpGETRequest(const String& serverName) {
+  http.begin(client, serverName);
+  client.setInsecure();
+
+  int httpResponseCode = http.GET();
+  String payload = "{}";
+
+  if (httpResponseCode > 0) {
+    Serial.print("HTTP Response code: ");
+    Serial.println(httpResponseCode);
+    payload = http.getString();
+  } else {
+    Serial.print("Error code: ");
+    Serial.println(httpResponseCode);
+  }
+
+  http.end();
+
+  return payload;
+}
